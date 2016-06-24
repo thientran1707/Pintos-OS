@@ -24,9 +24,6 @@ static int64_t ticks;
    Initialized by timer_calibrate(). */
 static unsigned loops_per_tick;
 
-/* List of sleeping threads in increasing order. */
-static struct list sleeping_list;
-
 static intr_handler_func timer_interrupt;
 static bool too_many_loops (unsigned loops);
 static void busy_wait (int64_t loops);
@@ -40,7 +37,6 @@ timer_init (void)
 {
   pit_configure_channel (0, 2, TIMER_FREQ);
   intr_register_ext (0x20, timer_interrupt, "8254 Timer");
-  list_init (&sleeping_list);
 }
 
 /* Calibrates loops_per_tick, used to implement brief delays. */
@@ -94,18 +90,10 @@ void
 timer_sleep (int64_t ticks) 
 {
   int64_t start = timer_ticks ();
-  int64_t wakeup_ticks = start + ticks; // no need to check for overflow
 
-  struct thread *t = thread_current ();
-  t->wakeup_ticks = wakeup_ticks;
-
-  list_push_back (&sleeping_list, &t->elem);  
-
-  // TODO: remove busy-waiting
   ASSERT (intr_get_level () == INTR_ON);
-  thread_block();
-  //while (timer_elapsed (start) < ticks) 
-    //thread_yield ();
+  while (timer_elapsed (start) < ticks) 
+    thread_yield ();
 }
 
 /* Sleeps for approximately MS milliseconds.  Interrupts must be
@@ -183,20 +171,6 @@ static void
 timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
-
-  /* Travel through sleeping_list to release threads */
-  struct thread *t = thread_current ();
-  while (t != NULL) {
-    // remove thread from sleeping_list
-    if (t->wakeup_ticks > ticks) {
-      list_remove(&t->elem);
-      thread_unblock(&t);
-    }
-  }
-
-  /* Called by the timer interrupt at each timer tick.
-  It keeps track of thread statistics and triggers the scheduler
-  when a time slice expires. */
   thread_tick ();
 }
 
